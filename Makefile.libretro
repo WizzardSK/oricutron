@@ -48,6 +48,24 @@ else ifeq ($(platform), osx)
 		CFLAGS += -arch $(ARCH)
 		LDFLAGS += -arch $(ARCH)
 	endif
+else ifneq (,$(findstring android,$(platform)))
+	# The buildbot's android-make jobs: platform=android-<abi>, the NDK's clang
+	# in ANDROID_NDK_LLVM (jni/Android.mk is the ndk-build way)
+	TARGET := $(TARGET_NAME)_libretro_android.so
+	fpic := -fPIC
+	SHARED := -shared -Wl,--no-undefined $(LINK_VERSION_SCRIPT)
+	LIBS += -llog
+	ANDROID_API ?= 21
+	CC_PREFIX := $(ANDROID_NDK_LLVM)/bin/
+	ifeq ($(platform), android-arm)
+		CC := $(CC_PREFIX)armv7a-linux-androideabi$(ANDROID_API)-clang
+	else ifeq ($(platform), android-arm64)
+		CC := $(CC_PREFIX)aarch64-linux-android$(ANDROID_API)-clang
+	else ifeq ($(platform), android-x86)
+		CC := $(CC_PREFIX)i686-linux-android$(ANDROID_API)-clang
+	else ifeq ($(platform), android-x86_64)
+		CC := $(CC_PREFIX)x86_64-linux-android$(ANDROID_API)-clang
+	endif
 else ifneq (,$(findstring ios,$(platform)))
 	TARGET := $(TARGET_NAME)_libretro_ios.dylib
 	fpic := -fPIC
