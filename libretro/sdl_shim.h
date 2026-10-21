@@ -13,6 +13,7 @@
 #ifndef ORICUTRON_LIBRETRO_SDL_SHIM_H
 #define ORICUTRON_LIBRETRO_SDL_SHIM_H
 
+#include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>

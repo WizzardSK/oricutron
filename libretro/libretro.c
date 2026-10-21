@@ -127,7 +127,7 @@ const char *SDL_COMPAT_JoystickName(SDL_Joystick *joystick) { (void)joystick; re
 
 /* The standalone's native menus, file requesters and message boxes: the
    frontend has its own, and a core has no window to put them in */
-void init_gui_native(struct machine *o) { (void)o; }
+SDL_bool init_gui_native(struct machine *o) { (void)o; return SDL_TRUE; }
 void shut_gui_native(struct machine *o) { (void)o; }
 void gui_open_url(const char *url) { (void)url; }
 
