@@ -6,6 +6,7 @@
 
 SOURCES_C := \
 	$(CORE_DIR)/libretro/libretro.c \
+	$(CORE_DIR)/libretro/snapmem.c \
 	$(CORE_DIR)/main.c \
 	$(CORE_DIR)/6502.c \
 	$(CORE_DIR)/machine.c \

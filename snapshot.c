@@ -45,6 +45,12 @@
 #include <emscripten.h>
 #endif
 
+#ifdef __LIBRETRO__
+/* Save states: the same code, writing to the core's memory buffer */
+#define ORICUTRON_SNAPSHOT_C
+#include "libretro/snapmem.h"
+#endif
+
 extern char diskpath[];
 
 #define MAX_BLOCK (262144)

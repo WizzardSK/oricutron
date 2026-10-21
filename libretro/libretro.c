@@ -18,6 +18,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 #include "../system.h"
 #include "../6502.h"
@@ -33,6 +34,7 @@
 #include "../main.h"
 
 #include "libretro.h"
+#include "snapmem.h"
 
 /* main.c, machine.c and 8912.c */
 SDL_bool init(struct machine *oric, int argc, char *argv[]);
@@ -42,6 +44,10 @@ void set_fileprefix(const char *prefix);
 int mapkey(struct machine *oric, int key);
 void ay_callback(void *dummy, Sint8 *stream, int length);
 void resetoric(struct machine *oric, struct osdmenuitem *mitem, int dummy);
+SDL_bool save_snapshot(struct machine *oric, char *filename);
+SDL_bool load_snapshot(struct machine *oric, char *filename);
+SDL_bool tape_load_tap(struct machine *oric, char *fname);
+void tape_eject(struct machine *oric);
 extern Uint8 oricpalette[];
 
 #define SCREEN_W 240
@@ -233,6 +239,10 @@ void retro_set_environment(retro_environment_t cb)
     log_cb = logging.log;
 
   cb(RETRO_ENVIRONMENT_SET_SUPPORT_NO_GAME, &no_game);
+  if(!cb(RETRO_ENVIRONMENT_GET_DISK_CONTROL_INTERFACE_VERSION, &version) || version < 1
+     || !cb(RETRO_ENVIRONMENT_SET_DISK_CONTROL_EXT_INTERFACE, &disk_control_ext))
+    cb(RETRO_ENVIRONMENT_SET_DISK_CONTROL_INTERFACE, &disk_control);
+  version = 0;
   cb(RETRO_ENVIRONMENT_SET_CONTROLLER_INFO, (void *)ports);
 
   if(cb(RETRO_ENVIRONMENT_GET_CORE_OPTIONS_VERSION, &version) && version >= 2)
@@ -272,7 +282,7 @@ void retro_get_system_info(struct retro_system_info *info)
   memset(info, 0, sizeof(*info));
   info->library_name = "Oricutron";
   info->library_version = "1.2.0";
-  info->valid_extensions = "tap|ort|dsk|sna";
+  info->valid_extensions = "tap|ort|dsk|sna|m3u";
   info->need_fullpath = true;
   info->block_extract = false;
 }
@@ -293,6 +303,171 @@ void retro_set_controller_port_device(unsigned port, unsigned device)
 {
   (void)port; (void)device;
 }
+
+/* --- Disk control --------------------------------------------------------
+   The images of a multi-disk or multi-tape game, from an .m3u or the one
+   loaded: disk images go in drive 0, tape images in the tape deck. The first
+   one is what the machine starts with; swapping is ejecting, choosing
+   another and inserting it, as in the frontend's Disc Control menu. */
+
+#define MAX_IMAGES 32
+static char *images[MAX_IMAGES];
+static unsigned num_images, image_index, initial_index;
+static bool image_ejected;
+static char initial_path[4096];
+
+static bool is_tape(const char *path)
+{
+  const char *ext = strrchr(path, '.');
+  return ext && (!strcasecmp(ext, ".tap") || !strcasecmp(ext, ".ort"));
+}
+
+static void free_images(void)
+{
+  unsigned i;
+  for(i = 0; i < num_images; i++)
+    free(images[i]);
+  num_images = 0;
+  image_index = 0;
+}
+
+static void add_image(const char *path)
+{
+  if(num_images < MAX_IMAGES)
+    images[num_images++] = strdup(path);
+}
+
+/* One image per line, relative to the .m3u's directory; # starts a comment */
+static void read_m3u(const char *m3u)
+{
+  char line[4096], dir[4096], path[8192];
+  const char *slash;
+  FILE *f = fopen(m3u, "r");
+  if(!f) return;
+  slash = strrchr(m3u, '/');
+#ifdef _WIN32
+  if(strrchr(m3u, '\\') > slash) slash = strrchr(m3u, '\\');
+#endif
+  snprintf(dir, sizeof(dir), "%.*s", slash ? (int)(slash - m3u + 1) : 0, m3u);
+  while(fgets(line, sizeof(line), f))
+  {
+    size_t n = strlen(line);
+    while(n && (line[n-1] == '\n' || line[n-1] == '\r' || line[n-1] == ' ')) line[--n] = 0;
+    if(!n || line[0] == '#') continue;
+    if(line[0] == '/' || line[0] == '\\' || (n > 1 && line[1] == ':'))
+      snprintf(path, sizeof(path), "%s", line);
+    else
+      snprintf(path, sizeof(path), "%s%s", dir, line);
+    add_image(path);
+  }
+  fclose(f);
+}
+
+static void insert_image(unsigned index)
+{
+  if(index >= num_images) return;
+  if(is_tape(images[index]))
+  {
+    if(!tape_load_tap(&oric, images[index]))
+      log_cb(RETRO_LOG_ERROR, "[Oricutron] Could not insert tape %s\n", images[index]);
+  }
+  else if(!diskimage_load(&oric, images[index], 0))
+    log_cb(RETRO_LOG_ERROR, "[Oricutron] Could not insert disk %s\n", images[index]);
+}
+
+static bool dc_set_eject_state(bool ejected)
+{
+  if(ejected == image_ejected) return true;
+  if(oric_running && image_index < num_images)
+  {
+    if(ejected)
+    {
+      if(is_tape(images[image_index])) tape_eject(&oric);
+      else disk_eject(&oric, 0);
+    }
+    else
+      insert_image(image_index);
+  }
+  image_ejected = ejected;
+  return true;
+}
+
+static bool dc_get_eject_state(void) { return image_ejected; }
+static unsigned dc_get_image_index(void) { return image_index; }
+static unsigned dc_get_num_images(void) { return num_images; }
+
+static bool dc_set_image_index(unsigned index)
+{
+  if(!image_ejected) return false;
+  if(index > num_images) return false;
+  image_index = index;
+  return true;
+}
+
+static bool dc_replace_image_index(unsigned index, const struct retro_game_info *info)
+{
+  if(index >= num_images) return false;
+  if(!info)
+  {
+    unsigned i;
+    free(images[index]);
+    for(i = index; i + 1 < num_images; i++) images[i] = images[i + 1];
+    num_images--;
+    if(image_index >= num_images && image_index) image_index--;
+    return true;
+  }
+  if(!info->path) return false;
+  free(images[index]);
+  images[index] = strdup(info->path);
+  return true;
+}
+
+static bool dc_add_image_index(void)
+{
+  if(num_images >= MAX_IMAGES) return false;
+  images[num_images++] = strdup("");
+  return true;
+}
+
+static bool dc_set_initial_image(unsigned index, const char *path)
+{
+  initial_index = index;
+  snprintf(initial_path, sizeof(initial_path), "%s", path ? path : "");
+  return true;
+}
+
+static bool dc_get_image_path(unsigned index, char *path, size_t len)
+{
+  if(index >= num_images || !images[index][0]) return false;
+  snprintf(path, len, "%s", images[index]);
+  return true;
+}
+
+static bool dc_get_image_label(unsigned index, char *label, size_t len)
+{
+  const char *name, *slash;
+  if(index >= num_images || !images[index][0]) return false;
+  name = images[index];
+  slash = strrchr(name, '/');
+  if(slash) name = slash + 1;
+#ifdef _WIN32
+  slash = strrchr(name, '\\');
+  if(slash) name = slash + 1;
+#endif
+  snprintf(label, len, "%s", name);
+  return true;
+}
+
+static struct retro_disk_control_ext_callback disk_control_ext = {
+  dc_set_eject_state, dc_get_eject_state, dc_get_image_index, dc_set_image_index,
+  dc_get_num_images, dc_replace_image_index, dc_add_image_index,
+  dc_set_initial_image, dc_get_image_path, dc_get_image_label,
+};
+
+static struct retro_disk_control_callback disk_control = {
+  dc_set_eject_state, dc_get_eject_state, dc_get_image_index, dc_set_image_index,
+  dc_get_num_images, dc_replace_image_index, dc_add_image_index,
+};
 
 static void release_keys(void)
 {
@@ -343,8 +518,26 @@ bool retro_load_game(const struct retro_game_info *game)
   }
   argv[argc++] = "--turbotape";
   argv[argc++] = strcmp(get_option("oricutron_turbotape", "enabled"), "enabled") == 0 ? "on" : "off";
+  free_images();
+  image_ejected = false;
   if(game && game->path)
-    argv[argc++] = (char *)game->path;
+  {
+    const char *ext = strrchr(game->path, '.');
+    if(ext && !strcasecmp(ext, ".m3u"))
+      read_m3u(game->path);
+    else
+      add_image(game->path);
+    if(!num_images)
+    {
+      log_cb(RETRO_LOG_ERROR, "[Oricutron] %s lists no images.\n", game->path);
+      return false;
+    }
+    /* The image the frontend says the game was left on, if it is still
+       the same list */
+    if(initial_index < num_images && initial_path[0] && !strcmp(images[initial_index], initial_path))
+      image_index = initial_index;
+    argv[argc++] = images[image_index];
+  }
   argv[argc] = NULL;
 
   memset(&oric, 0, sizeof(oric));
@@ -374,6 +567,7 @@ void retro_unload_game(void)
   release_keys();
   shut(&oric);
   oric_running = SDL_FALSE;
+  free_images();
 }
 
 void retro_reset(void)
@@ -477,9 +671,62 @@ void retro_run(void)
   audio_batch_cb(soundbuf, samples);
 }
 
-size_t retro_serialize_size(void) { return 0; }
-bool retro_serialize(void *data, size_t size) { (void)data; (void)size; return false; }
-bool retro_unserialize(const void *data, size_t size) { (void)data; (void)size; return false; }
+/* --- Save states: Oricutron's own snapshots, written to memory ------------
+   [u32 snapshot length][snapshot][zero padding]. The size handed out has
+   room to spare, as a snapshot grows with what is inserted (a disk image is
+   part of it). */
+
+static size_t state_size;
+
+static bool take_snapshot(const unsigned char **data, size_t *size)
+{
+  if(!oric_running || !save_snapshot(&oric, SNAPMEM_NAME)) return false;
+  *data = snapmem_output(size);
+  return *data != NULL;
+}
+
+size_t retro_serialize_size(void)
+{
+  const unsigned char *data;
+  size_t size;
+  if(take_snapshot(&data, &size))
+  {
+    size_t want = (4 + size + 65535) & ~(size_t)65535;
+    if(want + 65536 > state_size) state_size = want + 65536;
+  }
+  return state_size;
+}
+
+bool retro_serialize(void *buf, size_t len)
+{
+  const unsigned char *data;
+  size_t size;
+  unsigned char *out = (unsigned char *)buf;
+  if(!take_snapshot(&data, &size) || size + 4 > len) return false;
+  out[0] = (unsigned char)(size >> 24);
+  out[1] = (unsigned char)(size >> 16);
+  out[2] = (unsigned char)(size >> 8);
+  out[3] = (unsigned char)size;
+  memcpy(out + 4, data, size);
+  memset(out + 4 + size, 0, len - 4 - size);
+  return true;
+}
+
+bool retro_unserialize(const void *buf, size_t len)
+{
+  const unsigned char *in = (const unsigned char *)buf;
+  size_t size;
+  bool ok;
+  if(!oric_running || len < 4) return false;
+  size = ((size_t)in[0] << 24) | ((size_t)in[1] << 16) | ((size_t)in[2] << 8) | in[3];
+  if(size + 4 > len) return false;
+  release_keys();
+  snapmem_set_input(in + 4, size);
+  ok = load_snapshot(&oric, SNAPMEM_NAME) == SDL_TRUE;
+  snapmem_set_input(NULL, 0);
+  return ok;
+}
+
 void retro_cheat_reset(void) {}
 void retro_cheat_set(unsigned index, bool enabled, const char *code) { (void)index; (void)enabled; (void)code; }
 unsigned retro_get_region(void) { return RETRO_REGION_PAL; }
