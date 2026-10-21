@@ -219,6 +219,10 @@ static const char *get_option(const char *key, const char *fallback)
 
 /* --- libretro API -------------------------------------------------------- */
 
+/* Disk control, defined further down */
+static struct retro_disk_control_ext_callback disk_control_ext;
+static struct retro_disk_control_callback disk_control;
+
 void retro_set_environment(retro_environment_t cb)
 {
   static const struct retro_controller_description pads[] = {
