@@ -8,6 +8,6 @@ include $(CLEAR_VARS)
 LOCAL_MODULE     := retro
 LOCAL_SRC_FILES  := $(SOURCES_C)
 LOCAL_CFLAGS     := -O2 -DNDEBUG $(INCFLAGS) $(CORE_DEFINES) -std=gnu99 -Wno-unused-result
-LOCAL_LDFLAGS    := -Wl,-version-script=$(CORE_DIR)/link.T -Wl,-Bsymbolic
+LOCAL_LDFLAGS    := -Wl,-version-script=$(CORE_DIR)/link.T -Wl,-Bsymbolic -Wl,--no-undefined
 LOCAL_LDLIBS     := -lm -llog
 include $(BUILD_SHARED_LIBRARY)

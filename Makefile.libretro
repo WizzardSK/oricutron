@@ -33,7 +33,7 @@ LINK_VERSION_SCRIPT := -Wl,--version-script=$(CORE_DIR)/link.T -Wl,-Bsymbolic
 ifneq (,$(findstring unix,$(platform)))
 	TARGET := $(TARGET_NAME)_libretro.so
 	fpic := -fPIC
-	SHARED := -shared $(LINK_VERSION_SCRIPT)
+	SHARED := -shared -Wl,--no-undefined $(LINK_VERSION_SCRIPT)
 	CORE_DEFINES += -D__LINUX__
 else ifeq ($(platform), osx)
 	TARGET := $(TARGET_NAME)_libretro.dylib

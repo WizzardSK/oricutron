@@ -67,7 +67,8 @@ enum
 #define ASTF_IRQ       (1<<ASTB_IRQ)
 
 
-// Back-ends
+// Back-ends (none in the libretro core: the serial card loops back)
+#ifndef __LIBRETRO__
 #ifdef __LINUX__
 #define BACKEND_MODEM
 #endif
@@ -89,6 +90,7 @@ enum
 #ifdef WIN32
 #define BACKEND_COM
 #endif
+#endif /* __LIBRETRO__ */
 
 enum
 {
