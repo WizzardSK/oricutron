@@ -1,0 +1,89 @@
+# Oricutron as a libretro core
+#
+#   make -f Makefile.libretro                  (Linux, macOS, MinGW)
+#   make -f Makefile.libretro platform=win     (cross-compiling with MinGW-w64)
+#
+# Android builds with ndk-build and jni/Android.mk. The core links no SDL:
+# libretro/sdl_shim.h stands in for the SDL calls the emulator makes.
+
+TARGET_NAME := oricutron
+CORE_DIR := .
+
+ifeq ($(platform),)
+	platform = unix
+	ifeq ($(shell uname -s),)
+		platform = win
+	else ifneq ($(findstring MINGW,$(shell uname -s)),)
+		platform = win
+	else ifneq ($(findstring Darwin,$(shell uname -s)),)
+		platform = osx
+	endif
+endif
+
+include $(CORE_DIR)/libretro/Makefile.common
+
+LIBS := -lm
+fpic :=
+SHARED :=
+
+# The core is dlopened next to a frontend that has symbols of its own; without
+# this the dynamic linker can bind its calls to the frontend's copies.
+LINK_VERSION_SCRIPT := -Wl,--version-script=$(CORE_DIR)/link.T -Wl,-Bsymbolic
+
+ifneq (,$(findstring unix,$(platform)))
+	TARGET := $(TARGET_NAME)_libretro.so
+	fpic := -fPIC
+	SHARED := -shared $(LINK_VERSION_SCRIPT)
+	CORE_DEFINES += -D__LINUX__
+else ifeq ($(platform), osx)
+	TARGET := $(TARGET_NAME)_libretro.dylib
+	fpic := -fPIC
+	SHARED := -dynamiclib -Wl,-exported_symbol,_retro_*
+	ifeq ($(CROSS_COMPILE),1)
+		TARGET_RULE = -target $(LIBRETRO_APPLE_PLATFORM) -isysroot $(LIBRETRO_APPLE_ISYSROOT)
+		CFLAGS += $(TARGET_RULE)
+		LDFLAGS += $(TARGET_RULE)
+	endif
+	ifneq ($(ARCH),)
+		CFLAGS += -arch $(ARCH)
+		LDFLAGS += -arch $(ARCH)
+	endif
+else ifneq (,$(findstring ios,$(platform)))
+	TARGET := $(TARGET_NAME)_libretro_ios.dylib
+	fpic := -fPIC
+	SHARED := -dynamiclib
+	MINVERSION := -miphoneos-version-min=12.0
+	IOSSDK := $(shell xcodebuild -version -sdk iphoneos Path 2>/dev/null)
+	CC := cc -arch arm64 -isysroot $(IOSSDK) $(MINVERSION)
+else
+	TARGET := $(TARGET_NAME)_libretro.dll
+	ifneq ($(OS),Windows_NT)
+		ifeq ($(origin CC),default)
+			CC := x86_64-w64-mingw32-gcc
+		endif
+	endif
+	SHARED := -shared -static-libgcc -Wl,--no-undefined $(LINK_VERSION_SCRIPT)
+	CORE_DEFINES += -DWIN32
+endif
+
+ifeq ($(DEBUG), 1)
+	CFLAGS += -O0 -g
+else
+	CFLAGS += -O2 -DNDEBUG
+endif
+
+CFLAGS += $(fpic) $(INCFLAGS) $(CORE_DEFINES) -std=gnu99 -Wno-unused-result
+OBJECTS := $(SOURCES_C:.c=.lr.o)
+
+all: $(TARGET)
+
+$(TARGET): $(OBJECTS)
+	$(CC) $(fpic) $(SHARED) $(LDFLAGS) -o $@ $(OBJECTS) $(LIBS)
+
+%.lr.o: %.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+clean:
+	rm -f $(OBJECTS) $(TARGET)
+
+.PHONY: all clean

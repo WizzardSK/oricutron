@@ -22,7 +22,11 @@
 #ifndef ORICUTRON_SYSTEM_SDL_H
 #define ORICUTRON_SYSTEM_SDL_H
 
-#if SDL_MAJOR_VERSION == 1
+#if defined(__LIBRETRO__)
+/* The libretro core links no SDL: libretro/sdl_shim.h has the SDL 1.2 types
+   and calls the emulator uses */
+# include "libretro/sdl_shim.h"
+#elif SDL_MAJOR_VERSION == 1
 # ifdef __SPECIFY_SDL_DIR__
 # include <SDL/SDL.h>
 # include <SDL/SDL_version.h>

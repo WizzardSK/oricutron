@@ -193,6 +193,7 @@ static char* sbarmodes[] = { "full", "nofps", "none", NULL };
 static char* fileprefix = 0;
 
 // Initialize path prefix for locating program resources
+#ifndef __LIBRETRO__
 static void init_fileprefix(char* argv[])
 {
   (void) argv;
@@ -234,11 +235,26 @@ static void init_fileprefix(char* argv[])
 #endif
 }
 
+#endif
+
 // Get prefix string to locate program resources
 const char* get_fileprefix()
 {
   return fileprefix;
 }
+
+#ifdef __LIBRETRO__
+void libretro_log_error(const char* msg);
+
+// The libretro core's resources are in the frontend's system directory
+void set_fileprefix(const char* prefix)
+{
+  static char prefixbuf[4096];
+  strncpy(prefixbuf, prefix, sizeof(prefixbuf)-1);
+  prefixbuf[sizeof(prefixbuf)-1] = 0;
+  fileprefix = prefixbuf;
+}
+#endif
 
 // Check if filename looks to be absolute path
 SDL_bool is_abs_path(const char* filename)
@@ -752,7 +768,10 @@ void error_printf(char* fmt, ...)
   if(vsnprintf(str, 256, fmt, ap) != -1)
   {
     str[255] = 0;
-#ifdef WIN32
+#if defined(__LIBRETRO__)
+    // No window to show a message box in: the frontend's log
+    libretro_log_error(str);
+#elif defined(WIN32)
     MessageBoxA(NULL, str, "Oricutron", MB_OK);
 #else
     fprintf(stderr, "%s\n", str);
@@ -1413,6 +1432,10 @@ SDL_bool init(struct machine *oric, int argc, char* argv[])
   frametimeave = 0;
 
   setoverclock(oric, NULL, 0);
+#ifdef __LIBRETRO__
+  // The frontend draws the Oric's screen; there is no window to render into
+  sto->start_rendermode = RENDERMODE_NULL;
+#endif
   if(!init_gui(oric, sto->start_rendermode))
   {
     free(sto);
@@ -1779,6 +1802,8 @@ void once_per_frame(struct machine *oric)
   }
 }
 
+#ifndef __LIBRETRO__
+/* The libretro core runs frames from retro_run (libretro/libretro.c) */
 static void loop_handler(void* arg)
 {
   struct context* ctx = arg;
@@ -2214,3 +2239,4 @@ int main(int argc, char* argv[])
 
   return EXIT_SUCCESS;
 }
+#endif /* __LIBRETRO__ */

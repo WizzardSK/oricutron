@@ -2461,10 +2461,13 @@ SDL_bool init_gui(struct machine *oric, Sint32 rendermode)
   int i;
   SDL_AudioSpec wanted;
 
+#ifndef __LIBRETRO__
+  // The libretro core has no GUI of its own to draw these in
   for(i=0; i<NUM_GIMG; i++)
   {
     if(!gimg_load(&gimgs[i])) return SDL_FALSE;
   }
+#endif
 
   set_render_mode(oric, rendermode);
   if(!oric->init_render(oric)) return SDL_FALSE;

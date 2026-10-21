@@ -1,0 +1,66 @@
+name: libretro core
+
+# Builds oricutron_libretro for the platforms RetroArch runs on, the way the
+# libretro buildbot's recipe (.gitlab-ci.yml) does: Makefile.libretro on the
+# desktops, ndk-build with jni/Android.mk on Android. Each job checks that the
+# core exports the libretro API and lists what it links.
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  unix:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {name: Linux x86_64, os: ubuntu-22.04, make: 'platform=unix', lib: oricutron_libretro.so}
+          - {name: Linux aarch64, os: ubuntu-22.04-arm, make: 'platform=unix', lib: oricutron_libretro.so}
+          - {name: macOS arm64, os: macos-15, make: 'platform=osx ARCH=arm64', lib: oricutron_libretro.dylib}
+          - {name: macOS x86_64, os: macos-15-intel, make: 'platform=osx ARCH=x86_64', lib: oricutron_libretro.dylib}
+          - {name: Windows x86_64 (MinGW cross), os: ubuntu-24.04, make: 'platform=win', lib: oricutron_libretro.dll}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: MinGW-w64
+        if: matrix.make == 'platform=win'
+        run: sudo apt-get update -qq && sudo apt-get install -yqq gcc-mingw-w64-x86-64 >/dev/null
+      - name: Build
+        run: make -f Makefile.libretro ${{ matrix.make }} -j4
+      - name: Check
+        run: |
+          set -e
+          lib=${{ matrix.lib }}
+          case "$lib" in
+            *.dylib) lipo -info "$lib"; otool -L "$lib"; nm -gU "$lib" | grep -c ' _retro_' ;;
+            *.dll) x86_64-w64-mingw32-objdump -p "$lib" | grep "DLL Name"; x86_64-w64-mingw32-objdump -p "$lib" | grep -c " retro_" ;;
+            *) readelf -d "$lib" | grep NEEDED; nm -D --defined-only "$lib" | grep -c ' retro_' ;;
+          esac
+      - uses: actions/upload-artifact@v6
+        with:
+          name: oricutron_libretro-${{ matrix.name == 'Windows x86_64 (MinGW cross)' && 'windows-x86_64' || matrix.os }}
+          path: ${{ matrix.lib }}
+
+  android:
+    name: Android
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build
+        run: |
+          cd jni
+          $ANDROID_NDK_LATEST_HOME/ndk-build -j4
+      - name: Check
+        run: |
+          set -e
+          for abi in arm64-v8a armeabi-v7a x86_64 x86; do
+            lib=libs/$abi/libretro.so
+            $ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf -d $lib | grep NEEDED
+            $ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm -D --defined-only $lib | grep -c ' retro_'
+          done
+      - uses: actions/upload-artifact@v6
+        with:
+          name: oricutron_libretro-android
+          path: libs

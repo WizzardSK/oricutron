@@ -1,0 +1,38 @@
+# Sources and flags of the libretro core, shared by Makefile.libretro and
+# jni/Android.mk. Everything but main.c's SDL loop, the SDL glue
+# (system_sdl.c), the native file requesters, message boxes and menus, and the
+# OpenGL renderer: libretro/libretro.c and libretro/sdl_shim.h stand in for
+# those.
+
+SOURCES_C := \
+	$(CORE_DIR)/libretro/libretro.c \
+	$(CORE_DIR)/main.c \
+	$(CORE_DIR)/6502.c \
+	$(CORE_DIR)/machine.c \
+	$(CORE_DIR)/ula.c \
+	$(CORE_DIR)/gui.c \
+	$(CORE_DIR)/font.c \
+	$(CORE_DIR)/monitor.c \
+	$(CORE_DIR)/via.c \
+	$(CORE_DIR)/tape.c \
+	$(CORE_DIR)/8912.c \
+	$(CORE_DIR)/6551.c \
+	$(CORE_DIR)/6551_loopback.c \
+	$(CORE_DIR)/disk.c \
+	$(CORE_DIR)/disk_pravetz.c \
+	$(CORE_DIR)/avi.c \
+	$(CORE_DIR)/render_null.c \
+	$(CORE_DIR)/render_sw.c \
+	$(CORE_DIR)/render_sw8.c \
+	$(CORE_DIR)/joystick.c \
+	$(CORE_DIR)/snapshot.c \
+	$(CORE_DIR)/keyboard.c \
+	$(CORE_DIR)/plugins/ch376/ch376.c \
+	$(CORE_DIR)/plugins/ch376/oric_ch376_plugin.c \
+	$(CORE_DIR)/plugins/twilighte_board/oric_twilighte_board_plugin.c
+
+INCFLAGS := -I$(CORE_DIR) -I$(CORE_DIR)/libretro
+
+CORE_DEFINES := -D__LIBRETRO__ -DSDL_MAJOR_VERSION=1 \
+	-DAPP_NAME_FULL='"Oricutron"' -DAPP_YEAR='"2019"' \
+	-DVERSION_COPYRIGHTS='"Oricutron 1.2.0 (c)2019 Peter Gordon"'
